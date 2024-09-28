@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # Arquivo de saída para resultados
-output_file="test_results.csv"
+output_file="journalctl_logrotate_test_results.csv"
 
-# Cabeçalho da tabela de resultados
+# Cabeçalho da tabela de resultados no CSV
 echo "Comando, Repetição, Tempo de Execução (s), Leitura no Disco (KB), Escrita no Disco (KB), Troca de Contexto Antes, Troca de Contexto Depois" > $output_file
 
 # Função para executar o teste de desempenho
@@ -12,24 +12,32 @@ run_test() {
     repetitions="$2"
 
     for i in $(seq 1 $repetitions); do
-        # Executa o comando e coleta dados com time, strace e vmstat
-        /usr/bin/time -v strace -c $command > /dev/null 2> temp_output
-        # Captura os dados de interesse
-        exec_time=$(grep "Elapsed" temp_output | awk '{print $8}')
+        echo "Executando: $command (Repetição $i)"
+        
+        # Usa 'strace' para capturar métricas de I/O e troca de contexto e '/usr/bin/time' para o tempo de execução
+        # Saída redirecionada para /dev/null para evitar poluição do terminal
+        /usr/bin/time -f "%e" strace -c $command > /dev/null 2> temp_output
+
+        # Extrai o tempo de execução
+        exec_time=$(grep -oP '\d+\.\d+' <<< $(head -n 1 temp_output))
+
+        # Extrai leitura e escrita no disco
         read_kb=$(grep "read" temp_output | awk '{print $2}')
         write_kb=$(grep "write" temp_output | awk '{print $2}')
+
+        # Extrai troca de contexto antes e depois
         ctx_before=$(grep "voluntary" temp_output | awk '{print $1}')
         ctx_after=$(grep "involuntary" temp_output | awk '{print $1}')
         
-        # Escreve os resultados no arquivo CSV
+        # Armazena os resultados no arquivo CSV
         echo "$command, $i, $exec_time, $read_kb, $write_kb, $ctx_before, $ctx_after" >> $output_file
     done
 }
 
 # Número de repetições para cada comando
-reps=5
+repetitions=5
 
-# Comandos para testar
+# Lista dos comandos a serem testados
 commands=(
     "journalctl"
     "journalctl -b"
@@ -43,8 +51,11 @@ commands=(
 
 # Executa os testes para cada comando
 for cmd in "${commands[@]}"; do
-    run_test "$cmd" $reps
+    run_test "$cmd" $repetitions
 done
 
-# Limpeza de arquivos temporários
+# Limpeza do arquivo temporário
 rm temp_output
+
+echo "Testes concluídos. Resultados armazenados em $output_file."
+
